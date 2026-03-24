@@ -6,11 +6,14 @@ COMMON_PORTS = {
     53: "DNS", 80: "HTTP", 110: "POP3", 143: "IMAP",
     443: "HTTPS", 445: "SMB", 3306: "MySQL", 3389: "RDP",
     5432: "PostgreSQL", 6379: "Redis", 8080: "HTTP-Alt",
-    8443: "HTTPS-Alt", 8888: "HTTP-Alt", 27017: "MongoDB"
+    8443: "HTTPS-Alt", 8888: "HTTP-Alt", 27017: "MongoDB",
+    3000: "Node/React", 5000: "Flask", 8000: "Django"
 }
 
 def run(target):
-    domain = target.replace("https://", "").replace("http://", "").strip("/").split(":")[0]
+    raw = target.replace("https://", "").replace("http://", "").strip("/")
+    domain = raw.split(":")[0]
+    port_hint = int(raw.split(":")[1]) if ":" in raw else None
 
     try:
         ip = socket.gethostbyname(domain)
@@ -18,8 +21,12 @@ def run(target):
         print(f"    \033[91m[-] Could not resolve {domain}\033[0m")
         return []
 
+    ports_to_scan = list(COMMON_PORTS.keys())
+    if port_hint and port_hint not in ports_to_scan:
+        ports_to_scan.append(port_hint)
+
     print(f"    [*] Target: {domain} ({ip})")
-    print(f"    [*] Scanning {len(COMMON_PORTS)} common ports...\n")
+    print(f"    [*] Scanning {len(ports_to_scan)} ports...\n")
 
     found = []
 
@@ -38,7 +45,7 @@ def run(target):
         return None
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
-        results = executor.map(scan, COMMON_PORTS.keys())
+        results = executor.map(scan, ports_to_scan)
 
     found = [r for r in results if r]
 

